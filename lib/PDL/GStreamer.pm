@@ -55,6 +55,10 @@ sub _mk_player{
       "flags" => [qw/ video audio /],# GST_PLAY_FLAG_VIDEO GST_PLAY_FLAG_AUDIO /],
    );
    $player -> set(uri => Glib::filename_to_uri $self->filename, "localhost");
+   $player->set_state('playing');
+   #$player->set_state('paused');
+   my @state = $player->get_state(-1);
+   die join(',',@state) unless $state[0] eq 'success';
    return $player;
 }
 
@@ -82,6 +86,7 @@ sub image_caps{
 
 sub seek{
    my ($self,$time) = @_;
+   $self->check_video;
    my $ok = $self->player->seek(
       1, #rate
       "time", #3, #format. GST_FORMAT_TIME(), #format
@@ -91,7 +96,6 @@ sub seek{
       "none", #stop_type. GST_SEEK_TYPE_NONE.
       -1, # stop.
    );
-   $self->player->get_state(-1);
    die 'seek not handled correctly?' unless $ok;
 }
 
@@ -99,12 +103,32 @@ sub capture_image{
    my $self = shift;
 #   my $buf = $self->_videosink->pull_preroll();
    #$self->player->set_state('playing');
-   my @foo = $self->player->get_state(-1);
+#   my @foo = $self->player->get_state(-1);
    #die @foo;
-   my $buf = $self->player->signal_emit ('convert-frame', $self->image_caps);
-   die $buf;
+   my ($buf) = $self->player->signal_emit ('convert-frame', $self->image_caps);
+   my $caps = $buf->get_caps->get_structure(0);
+   # convert GstStructure to {name => [name,type,value], ...}
+   my %caps = map {$_->[0]  => $_} @{$caps->{fields}};
+   my $height = $caps{height}[2];
+   my $width = $caps{width}[2];
+   my $depth = $caps{depth}[2]; #24, as ordered.
+   #die join "\n",%caps;
+   #width,height,{color}_mask,depth,pixel-aspect-ratio,endianness,bpp
+   return pdl $buf->data;
 }
 
+sub check_audio{
+   my $self = shift;
+   #my $naudiochannels = $self->player->get ('n-audio');
+   my $tags = $self->player->signal_emit ('get-audio-tags',0);
+   return ref ($tags) eq 'HASH';
+}
 
+sub check_video{
+   my $self = shift;
+   #my $nvideochannels = $self->player->get ('n-video');
+   my $tags = $self->player->signal_emit ('get-video-tags',0);
+   return ref ($tags) eq 'HASH';
+}
 
 'excelloriffying';
