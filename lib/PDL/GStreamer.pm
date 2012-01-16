@@ -37,17 +37,29 @@ has _videosink => (
    required => 0,
 );
 
+my $plug = GStreamer::Plugin::load_by_name('app');
+#die $plug->get_filename; #/usr/lib/gstreamer-0.10/libgstapp.so
+#my $registry = GStreamer::Registry -> get_default();
+#my @features = $registry->get_feature_list_by_plugin("app");
+#die join ',',map {$_->get_name}@features;
+#die %{$features[2]};
+
 sub _mk_player{
    my $self = shift;
    my $player = GStreamer::ElementFactory -> make(playbin2 => "player");
    # http://git.gnome.org/browse/totem/tree/src/totem-video-thumbnailer.c
    # http://git.gnome.org/browse/totem/tree/src/gst/totem-gst-helpers.c
-   my $audio_sink = GStreamer::ElementFactory->make ("fakesink", "audio-fake-sink");
-   #my $video_sink = GStreamer::ElementFactory->make ("fakesink", "video-fake-sink");
-   my $video_sink = GStreamer::ElementFactory->make ("fakesink", "video-app-sink");
+   my $audio_sink = GStreamer::ElementFactory->make ("appsink", "audio-app-sink");
+   my $video_sink = GStreamer::ElementFactory->make ("fakesink", "video-fake-sink");
+   #$audio_sink->pull_preroll();
+   #  die $audio_sink; # Glib::Object::_Unregistered::GstAppSink=HASH(...
+   # it's empty though. an inside out object, I guess.
    $video_sink->set("sync", TRUE);
    $self->_audiosink($audio_sink);
    $self->_videosink($video_sink);
+   #use Data::Dumper;
+   #die Dumper $self->_audiosink->list_properties();
+   #$audio_sink->set(dump => TRUE); #stdout would be such an ugly solution.
 
    $player->set(
       "audio-sink" => $audio_sink,
@@ -55,7 +67,7 @@ sub _mk_player{
       "flags" => [qw/ video audio /],# GST_PLAY_FLAG_VIDEO GST_PLAY_FLAG_AUDIO /],
    );
    $player -> set(uri => Glib::filename_to_uri $self->filename, "localhost");
-   #$player->set_state('playing');
+#   $player->set_state('playing');
    $player->set_state('paused');
    my @state = $player->get_state(-1);
    die join(',',@state) unless $state[0] eq 'success';
@@ -138,11 +150,13 @@ sub capture_image{
 
 sub capture_audio{
    my ($self,$seconds) = @_;
-   
-   my $buf = $self->player->signal_emit ('convert-frame', $self->audio_caps);
-   die $buf;
+   #right now we're not even specifying duration.. anything would be nice.
+   my $buf = $self->_audiosink->pull_preroll();
+   #my $buf = $self->player->signal_emit ('convert-frame', $self->audio_caps);
+   warn $buf;
    my $caps = $buf->get_caps->get_structure(0);
-   die $caps;
+   warn $caps;
+   return $buf->data;
 }
 
 
