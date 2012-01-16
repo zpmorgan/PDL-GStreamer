@@ -55,8 +55,8 @@ sub _mk_player{
       "flags" => [qw/ video audio /],# GST_PLAY_FLAG_VIDEO GST_PLAY_FLAG_AUDIO /],
    );
    $player -> set(uri => Glib::filename_to_uri $self->filename, "localhost");
-   $player->set_state('playing');
-   #$player->set_state('paused');
+   #$player->set_state('playing');
+   $player->set_state('paused');
    my @state = $player->get_state(-1);
    die join(',',@state) unless $state[0] eq 'success';
    return $player;
@@ -90,23 +90,28 @@ sub seek{
    my $ok = $self->player->seek(
       1, #rate
       "time", #3, #format. GST_FORMAT_TIME(), #format
-      [qw/accurate/],#"GST_SEEK_FLAG_ACCURATE", #flags
+      [qw/accurate flush/],#"GST_SEEK_FLAG_ACCURATE", #flags
       "set" , #GST_SEEK_TYPE_SET -- absolute position is requested
       $time * GST_SECOND, #cur
       "none", #stop_type. GST_SEEK_TYPE_NONE.
       -1, # stop.
    );
+
+   my $bus = $self->player->get_bus();
+   while(1){ #wait for seek to complete.
+      my $msg = $bus->poll('any',-1);#([qw/error async-done/], -1);
+      last if ($msg->type & 'async-done');
+      die $msg if $msg->type & 'error';
+#      warn $msg;
+   }
    my @state = $self->player->get_state(-1);
    die 'seek not handled correctly?' unless $ok;
 }
 
 sub capture_image{
    my $self = shift;
-#   my $buf = $self->_videosink->pull_preroll();
-   #$self->player->set_state('playing');
-#   my @foo = $self->player->get_state(-1);
-   #die @foo;
-   my ($buf) = $self->player->signal_emit ('convert-frame', $self->image_caps);
+
+   my $buf = $self->player->signal_emit ('convert-frame', $self->image_caps);
    my $caps = $buf->get_caps->get_structure(0);
    # convert GstStructure to {name => [name,type,value], ...}
    my %caps = map {$_->[0]  => $_} @{$caps->{fields}};
