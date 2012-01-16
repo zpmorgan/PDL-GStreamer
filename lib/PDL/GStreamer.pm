@@ -96,6 +96,7 @@ sub seek{
       "none", #stop_type. GST_SEEK_TYPE_NONE.
       -1, # stop.
    );
+   my @state = $self->player->get_state(-1);
    die 'seek not handled correctly?' unless $ok;
 }
 
@@ -112,9 +113,14 @@ sub capture_image{
    my $height = $caps{height}[2];
    my $width = $caps{width}[2];
    my $depth = $caps{depth}[2]; #24, as ordered.
+   my $bpp = $caps{bpp}[2]; #also 24?
+   #die $buf->duration; #maybe 1billion/29.97
    #die join "\n",%caps;
    #width,height,{color}_mask,depth,pixel-aspect-ratio,endianness,bpp
-   return pdl $buf->data;
+   my $piddle = pdl unpack('C*',$buf->data);
+   $piddle->inplace->reshape(3,$width,$height);
+   return $piddle; #not scaled. range:0-255.
+
 }
 
 sub check_audio{

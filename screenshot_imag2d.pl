@@ -15,8 +15,8 @@ my $noir = PDL::GStreamer->new(
 );
 die unless $noir->check_video && $noir->check_audio;
 
-$noir->seek(500); #seconds
+$noir->seek(700); #seconds
 my $screenshot = $noir->capture_image;
-imag2d($screenshot);
+imag2d($screenshot/256);
 
 
