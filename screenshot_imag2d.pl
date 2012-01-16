@@ -18,7 +18,16 @@ $noir->seek(732.8); #seconds
 my $screenshot = $noir->capture_image;
 imag2d($screenshot/256);
 
-$noir->seek(800); #seconds
+$noir->seek(900); #seconds
 $screenshot = $noir->capture_image;
 imag2d($screenshot/256);
+
+my $sound = ''; #'blah'x999;
+$sound = $noir->capture_audio(8);
+
+#this isn't very portable.
+my $pa;
+open ($pa,'|padsp tee /dev/dsp > /dev/null');
+print $pa $sound;
+close($pa);
 

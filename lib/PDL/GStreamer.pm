@@ -82,7 +82,15 @@ sub image_caps{
    );
    return $img_caps;
 }
-
+sub audio_caps{
+   my $self = shift;
+   my $audio_caps = GStreamer::Caps::Simple->new ("audio/x-raw-int",
+      'signed', 'Glib::Boolean',FALSE,
+      'width','Glib::Int',8,
+      'depth','Glib::Int',8,
+   );
+   return $audio_caps;
+}
 
 sub seek{
    my ($self,$time) = @_;
@@ -127,6 +135,16 @@ sub capture_image{
    return $piddle; #not scaled. range:0-255.
 
 }
+
+sub capture_audio{
+   my ($self,$seconds) = @_;
+   
+   my $buf = $self->player->signal_emit ('convert-frame', $self->audio_caps);
+   die $buf;
+   my $caps = $buf->get_caps->get_structure(0);
+   die $caps;
+}
+
 
 sub check_audio{
    my $self = shift;
