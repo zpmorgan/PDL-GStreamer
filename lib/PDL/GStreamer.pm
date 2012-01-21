@@ -4,6 +4,8 @@ use MooseX::Types::Path::Class;
 use PDL;
 use GStreamer qw/ -init GST_SECOND /;
 use Glib qw/TRUE FALSE/;
+use GStreamer::App;
+use POSIX ();
 
 #my $appsinkplugin = GStreamer::Plugin::load_by_name('app');
 #die unless $appsinkplugin->get_description;
@@ -51,15 +53,12 @@ sub _mk_player{
    # http://git.gnome.org/browse/totem/tree/src/gst/totem-gst-helpers.c
    my $audio_sink = GStreamer::ElementFactory->make ("appsink", "audio-app-sink");
    my $video_sink = GStreamer::ElementFactory->make ("fakesink", "video-fake-sink");
-   #$audio_sink->pull_preroll();
-   #  die $audio_sink; # Glib::Object::_Unregistered::GstAppSink=HASH(...
-   # it's empty though. an inside out object, I guess.
    $video_sink->set("sync", TRUE);
    $self->_audiosink($audio_sink);
    $self->_videosink($video_sink);
+   #$audio_sink->set_caps($self->audio_caps);
    #use Data::Dumper;
    #die Dumper $self->_audiosink->list_properties();
-   #$audio_sink->set(dump => TRUE); #stdout would be such an ugly solution.
 
    $player->set(
       "audio-sink" => $audio_sink,
@@ -67,7 +66,7 @@ sub _mk_player{
       "flags" => [qw/ video audio /],# GST_PLAY_FLAG_VIDEO GST_PLAY_FLAG_AUDIO /],
    );
    $player -> set(uri => Glib::filename_to_uri $self->filename, "localhost");
-#   $player->set_state('playing');
+   #$player->set_state('playing');
    $player->set_state('paused');
    my @state = $player->get_state(-1);
    die join(',',@state) unless $state[0] eq 'success';
@@ -83,6 +82,8 @@ sub image_caps{
    #* specific framerate, because the input framerate won't
    #* necessarily match the output framerate if there's a deinterlacer
    #* in the pipeline. */
+   #
+   #NOTE: Check out caps = Gst::Caps->from_string
    my $img_caps = GStreamer::Caps::Simple->new ("video/x-raw-rgb",
       "bpp", "Glib::Int", 24,
       "depth", 'Glib::Int', 24,
@@ -150,13 +151,27 @@ sub capture_image{
 
 sub capture_audio{
    my ($self,$seconds) = @_;
-   #right now we're not even specifying duration.. anything would be nice.
-   my $buf = $self->_audiosink->pull_preroll();
-   #my $buf = $self->player->signal_emit ('convert-frame', $self->audio_caps);
-   warn $buf;
-   my $caps = $buf->get_caps->get_structure(0);
-   warn $caps;
-   return $buf->data;
+   my $initbuf = $self->_audiosink->pull_preroll;
+   my $caps = $initbuf->get_caps->to_string;
+   #my $caps = $buf->get_caps->get_structure(0);
+   #warn $caps;
+   my ($endian) = $caps =~ /endianness=\(int\)(\d)/;
+   my $littleendian = $endian==4;
+   my ($rate) = $caps =~ /rate=\(int\)(\d+)\b/;
+   my ($signed) = $caps =~ /signed=\(boolean\)(\w+)\b/;
+   my $signedness = $signed eq 'true';
+   #ignoring depth. I don't suppose it's relevant.
+   my ($width) = $caps =~ /width=\(int\)(\d+)\b/;
+   $self->player->set_state('playing');
+   my $num_buffers = POSIX::ceil($seconds *($width/8) * $rate / $initbuf->size);
+   my @datas;
+   for (1..$num_buffers){
+      my $buf = $self->_audiosink->pull_buffer();
+      push @datas,$buf->data;
+   }
+   my $data = join '',@datas;
+   warn length $data;;
+   return $data;
 }
 
 
