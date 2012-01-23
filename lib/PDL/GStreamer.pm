@@ -162,16 +162,37 @@ sub capture_audio{
    my $signedness = $signed eq 'true';
    #ignoring depth. I don't suppose it's relevant.
    my ($width) = $caps =~ /width=\(int\)(\d+)\b/;
+   my ($channels) = $caps =~ /channels=\(int\)(\d)/;
+
    $self->player->set_state('playing');
-   my $num_buffers = POSIX::ceil($seconds *($width/8) * $rate / $initbuf->size);
+   my $num_buffers = POSIX::ceil(
+      $channels * $seconds *($width/8) * $rate / $initbuf->size);
+
    my @datas;
    for (1..$num_buffers){
       my $buf = $self->_audiosink->pull_buffer();
       push @datas,$buf->data;
    }
+
+   my $ptemplate; #TEMPLATE for unpack. bleh.
+   $ptemplate = 'n' if (($width==16) and !$littleendian);
+   $ptemplate = 's' if (($width==16) and $littleendian);
+   die "$caps unpackable?" unless $ptemplate;
+
    my $data = join '',@datas;
-   warn length $data;;
-   return $data;
+   my $format = {
+      littleendian => $littleendian,
+      rate => $rate,
+      width => $width,
+      signed => $signedness,
+      channels => $channels,
+      packtemplate => $ptemplate,
+   };
+
+   my @data = unpack ($ptemplate.'*' , $data); #bleh.
+   my $piddle = pdl(@data);
+   $piddle->reshape($channels, $piddle->dim(0)/$channels);
+   return ($piddle,$format);
 }
 
 

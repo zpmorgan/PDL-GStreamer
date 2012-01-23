@@ -26,12 +26,13 @@ $noir->seek(rand(2200)); #seconds
 $screenshot = $noir->capture_image;
 imag2d($screenshot/256);
 
-my $sound = ''; #'blah'x999;
-$sound = $noir->capture_audio(8);
-
+my ($sound,$format) = $noir->capture_audio(20);
+#die $sound->dims;
 #this isn't very portable.
+#slice out the first channel.
+my $rawsound = pack ($format->{packtemplate} .'*' , $sound->slice('0')->list);
 my $pa;
-open ($pa,'|pacat --format=s16le');
-print $pa $sound;
+open ($pa,'|pacat --format=s16le --channels=1');
+print $pa $rawsound;
 close($pa);
 
