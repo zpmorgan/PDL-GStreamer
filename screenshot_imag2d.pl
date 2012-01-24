@@ -26,7 +26,7 @@ $noir->seek(rand(2200)); #seconds
 $screenshot = $noir->capture_image;
 imag2d($screenshot/256);
 
-my ($sound,$format) = $noir->capture_audio(20);
+my ($sound,$format) = $noir->capture_audio(10);
 #die $sound->dims;
 #this isn't very portable.
 #slice out the first channel.

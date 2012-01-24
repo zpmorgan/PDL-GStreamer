@@ -6,6 +6,9 @@ use GStreamer qw/ -init GST_SECOND /;
 use Glib qw/TRUE FALSE/;
 use GStreamer::App;
 use POSIX ();
+use Carp 'confess';
+
+my $loop = Glib::MainLoop->new();
 
 #my $appsinkplugin = GStreamer::Plugin::load_by_name('app');
 #die unless $appsinkplugin->get_description;
@@ -26,6 +29,17 @@ has player => (
    isa => 'GStreamer::Pipeline',
 );
 
+has _audio_pipeline => (
+   is => 'ro',
+   lazy => 1,
+   isa => 'GStreamer::Pipeline',
+   builder => '_mk_audio_pipeline',
+);
+has _audio_decoder => (
+   is => 'rw',
+   isa => 'GStreamer::Element',
+);
+
 has _audiosink => (
    is => 'rw',
    #seems like this 'isa' could break.
@@ -38,32 +52,82 @@ has _videosink => (
    #isa => 'Glib::Object::_Unregistered::GstFakeSink',
    required => 0,
 );
+has [ qw/do_audio do_video/ ] => (
+   is => 'ro',
+   isa => 'Bool',
+   default => 1,
+);
 
-my $plug = GStreamer::Plugin::load_by_name('app');
-#die $plug->get_filename; #/usr/lib/gstreamer-0.10/libgstapp.so
-#my $registry = GStreamer::Registry -> get_default();
-#my @features = $registry->get_feature_list_by_plugin("app");
-#die join ',',map {$_->get_name}@features;
-#die %{$features[2]};
+has audio_datas => (
+   is => 'rw',
+   isa => 'ArrayRef',
+   default => sub {[]},
+);
+
+#my $plug = GStreamer::Plugin::load_by_name('app');
+# GstPipeline:audio-pipe
+# GstURIDecodeBin:audio-decoder
+# GstDecodeBin2:decodebin20
+# GstMpegAudioParse:mpegaudioparse0:
+sub _mk_audio_pipeline{
+   my $self = shift;
+   my $pipeline = GStreamer::Pipeline->new('audio-pipe');
+   my $decoder = GStreamer::ElementFactory->make (uridecodebin=>'audio-decoder');
+   #my $filter = GStreamer::ElementFactory->make (identity =>'noop');
+   #my $conv = GStreamer::ElementFactory->make('audioconvert','aconv');
+   my $audio_sink = GStreamer::ElementFactory->make ("appsink", "audio-appsink");
+
+   #$pipeline->add($decoder,$conv, $audio_sink);
+   $pipeline->add($decoder, $audio_sink);
+
+   $pipeline->signal_connect ('pad-added', \&on_new_decoded_audio_pad, $audio_sink);
+   # dynamic pads. bleh.
+#unless ($decoder->link($filter,$audio_sink)){
+#     $self->_reveal_errs($pipeline->get_bus);
+#     die 'link failed';
+#  }
+
+   $decoder->set(uri => Glib::filename_to_uri $self->filename, "localhost");
+   $pipeline->set_state('paused');
+   $audio_sink->set("sync", FALSE);
+
+   #$decoder->link($audio_sink);
+   $self->_audio_decoder($decoder);
+   $self->_audiosink($audio_sink);
+
+   return $pipeline;
+   my @state = $pipeline->get_state(-1);
+   unless ($state[0] eq 'success'){
+      $self->_reveal_errs($pipeline->get_bus);
+   }
+   return $pipeline;
+}
+
+sub on_new_decoded_audio_pad{
+   my ($adbin,$pad, $appsink) = @_;
+   $adbin->link($appsink);
+}
+sub no_more_audio_pads{
+   my ($adbin) = @_;
+   $loop->quit();
+}
 
 sub _mk_player{
    my $self = shift;
+   confess 'fixme';
    my $player = GStreamer::ElementFactory -> make(playbin2 => "player");
    # http://git.gnome.org/browse/totem/tree/src/totem-video-thumbnailer.c
    # http://git.gnome.org/browse/totem/tree/src/gst/totem-gst-helpers.c
-   my $audio_sink = GStreamer::ElementFactory->make ("appsink", "audio-app-sink");
+   my $audio_sink = GStreamer::ElementFactory->make ("appsink", "audio-fake-sink");
    my $video_sink = GStreamer::ElementFactory->make ("fakesink", "video-fake-sink");
    $video_sink->set("sync", TRUE);
-   $self->_audiosink($audio_sink);
+   #$self->_audiosink($audio_sink);
    $self->_videosink($video_sink);
-   #$audio_sink->set_caps($self->audio_caps);
-   #use Data::Dumper;
-   #die Dumper $self->_audiosink->list_properties();
 
    $player->set(
-      "audio-sink" => $audio_sink,
+#      "audio-sink" => $audio_sink,
       "video-sink" => $video_sink,
-      "flags" => [qw/ video audio /],# GST_PLAY_FLAG_VIDEO GST_PLAY_FLAG_AUDIO /],
+      "flags" => [qw/ video /],# GST_PLAY_FLAG_VIDEO GST_PLAY_FLAG_AUDIO /],
    );
    $player -> set(uri => Glib::filename_to_uri $self->filename, "localhost");
    #$player->set_state('playing');
@@ -105,10 +169,41 @@ sub audio_caps{
    return $audio_caps;
 }
 
+sub _poll_for_async_done{
+   my ($self,$bus) = @_;
+   while(1){
+      my $msg = $bus->poll('any',-1);#([qw/error async-done/], -1);
+      last if ($msg->type & 'async-done');
+      die $msg if $msg->type & 'error';
+   }
+}
+use Data::Dumper;
+sub _reveal_errs{
+   my ($self,$bus) = @_;
+   my @errs;
+   while(1){
+      my $msg = $bus->poll('any',1);#([qw/error async-done/], -1);
+      last unless $msg;
+      if ($msg->type & 'error' or $msg->type & 'warning'){
+         push @errs, $msg->error;
+         push @errs, $msg->debug;
+      }
+      elsif($msg->type & 'stream-status'){
+         warn Dumper $msg->get_structure->{fields}[0][2] . 'streamstatus';
+      }
+      else {
+         warn $msg->type;
+      }
+   }
+   return unless @errs;
+   confess join "\n",@errs;
+}
+
 sub seek{
    my ($self,$time) = @_;
-   $self->check_video;
-   my $ok = $self->player->seek(
+   #$self->check_video;
+
+   my @seek_params = (
       1, #rate
       "time", #3, #format. GST_FORMAT_TIME(), #format
       [qw/accurate flush/],#"GST_SEEK_FLAG_ACCURATE", #flags
@@ -117,16 +212,34 @@ sub seek{
       "none", #stop_type. GST_SEEK_TYPE_NONE.
       -1, # stop.
    );
-
-   my $bus = $self->player->get_bus();
-   while(1){ #wait for seek to complete.
-      my $msg = $bus->poll('any',-1);#([qw/error async-done/], -1);
-      last if ($msg->type & 'async-done');
-      die $msg if $msg->type & 'error';
-#      warn $msg;
+   $self->_audio_pipeline;
+   if ($self->do_audio){
+      #my $ok = $self->_audio_pipeline->seek(@seek_params);
+      my $ok = $self->_audio_pipeline->seek(@seek_params);
+      #sleep 1;
+      $self->_audio_pipeline->get_state(-1);
+      #$self->_reveal_errs($self->_audio_pipeline->get_bus) unless $ok;
+      #die 'seek not handled correctly?' unless $ok;
+      #$self->_poll_for_async_done($self->_audio_pipeline->get_bus());
    }
-   my @state = $self->player->get_state(-1);
-   die 'seek not handled correctly?' unless $ok;
+   if ($self->do_video){
+      my $ok = $self->player->seek(@seek_params);
+      die 'seek not handled correctly?' unless $ok;
+      $self->_poll_for_async_done($self->player->get_bus());
+   }
+   return;
+
+   my $vbus = $self->player->get_bus();
+   my $abus = $self->_audio_pipeline->get_bus();
+   #die join '|',($abus,$bus);
+   for my $bus ($abus,$vbus){
+      while(1){ #wait for seek to complete.
+         my $msg = $bus->poll('any',-1);#([qw/error async-done/], -1);
+         last if ($msg->type & 'async-done');
+         die $msg if $msg->type & 'error';
+      }
+   }
+#   my @state = $self->player->get_state(-1);
 }
 
 sub capture_image{
@@ -149,12 +262,10 @@ sub capture_image{
 
 }
 
-sub capture_audio{
-   my ($self,$seconds) = @_;
-   my $initbuf = $self->_audiosink->pull_preroll;
-   my $caps = $initbuf->get_caps->to_string;
-   #my $caps = $buf->get_caps->get_structure(0);
-   #warn $caps;
+sub _read_audio_caps{
+   my $caps_obj = shift;
+   my $caps = $caps_obj->to_string;
+
    my ($endian) = $caps =~ /endianness=\(int\)(\d)/;
    my $littleendian = $endian==4;
    my ($rate) = $caps =~ /rate=\(int\)(\d+)\b/;
@@ -163,23 +274,12 @@ sub capture_audio{
    #ignoring depth. I don't suppose it's relevant.
    my ($width) = $caps =~ /width=\(int\)(\d+)\b/;
    my ($channels) = $caps =~ /channels=\(int\)(\d)/;
-
-   $self->player->set_state('playing');
-   my $num_buffers = POSIX::ceil(
-      $channels * $seconds *($width/8) * $rate / $initbuf->size);
-
-   my @datas;
-   for (1..$num_buffers){
-      my $buf = $self->_audiosink->pull_buffer();
-      push @datas,$buf->data;
-   }
-
+   
    my $ptemplate; #TEMPLATE for unpack. bleh.
    $ptemplate = 'n' if (($width==16) and !$littleendian);
    $ptemplate = 's' if (($width==16) and $littleendian);
    die "$caps unpackable?" unless $ptemplate;
 
-   my $data = join '',@datas;
    my $format = {
       littleendian => $littleendian,
       rate => $rate,
@@ -188,10 +288,55 @@ sub capture_audio{
       channels => $channels,
       packtemplate => $ptemplate,
    };
+   return $format;
+}
 
-   my @data = unpack ($ptemplate.'*' , $data); #bleh.
+sub capture_audio{
+   my ($self,$seconds) = @_;
+   $self->_audio_pipeline; #build ifn't already
+   my $caps;
+   my $format;
+   my $audiosink = $self->_audiosink;
+   $audiosink->set_emit_signals(TRUE);
+   my @datas;
+   my $datatarget;
+   my $datasize=0;
+   $self->_audio_decoder->signal_connect('pad-added', sub{
+         warn 'buf pad!';
+         my ($adbin, $pad) = @_;
+         $adbin->link($audiosink);
+#   $self->_audiosink->set("sync", FALSE);
+      }
+   );
+   $self->_audio_decoder->signal_connect('no-more-pads', sub{
+         my ($adbin) = @_;
+         #$loop->quit;
+      }
+   );
+   $audiosink->signal_connect("new-buffer", sub{
+         #my $audiosink = shift;
+         my $buf = $audiosink->pull_buffer();
+         unless ($format){
+            $caps = $buf->get_caps();
+            $format = _read_audio_caps($caps);
+            $datatarget = $format->{channels} * $seconds *
+                          ($format->{width}/8) * $format->{rate};
+         }
+         push @datas, $buf->data;
+         $datasize += $buf->size;
+         $loop->quit if $datasize >= $datatarget;
+      }
+   );
+   $self->seek(30);
+   $self->_audio_pipeline->set_state('playing');
+   $loop->run;
+   $self->_audio_pipeline->set_state('null');
+
+   my $data = join '',@datas;
+
+   my @data = unpack ($format->{packtemplate}.'*' , $data); #bleh.
    my $piddle = pdl(@data);
-   $piddle->reshape($channels, $piddle->dim(0)/$channels);
+   $piddle->reshape($format->{channels}, $piddle->dim(0)/$format->{channels});
    return ($piddle,$format);
 }
 
