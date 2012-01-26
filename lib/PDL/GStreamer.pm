@@ -4,14 +4,11 @@ use MooseX::Types::Path::Class;
 use PDL;
 use GStreamer qw/ -init GST_SECOND /;
 use Glib qw/TRUE FALSE/;
-use GStreamer::App;
+#use GStreamer::App;
 use POSIX ();
 use Carp 'confess';
 
 my $loop = Glib::MainLoop->new();
-
-#my $appsinkplugin = GStreamer::Plugin::load_by_name('app');
-#die unless $appsinkplugin->get_description;
 
 # http://gstreamer.freedesktop.org/data/doc/gstreamer/head/manual/html/section-data-spoof.html
 
@@ -43,7 +40,7 @@ has _audio_decoder => (
 has _audiosink => (
    is => 'rw',
    #seems like this 'isa' could break.
-   #isa => 'Glib::Object::_Unregistered::GstFakeSink',
+   isa => 'Glib::Object::_Unregistered::GstAppSink',
    required => 0,
 );
 has _videosink => (
@@ -251,17 +248,17 @@ sub capture_audio{
    my $caps;
    my $format;
    my $audiosink = $self->_audiosink;
-   $audiosink->set_emit_signals(TRUE);
+   $audiosink->set(emit_signals => TRUE);
+   $audiosink->set("sync", FALSE);
    my @datas;
    my $datatarget;
    my $datasize=0;
-   $self->_audiosink->set("sync", FALSE);
    $self->_audio_decoder->signal_connect('pad-added', sub{
          warn 'buf pad!';
          my ($adbin, $pad) = @_;
-         $pad->link($audiosink->get_pad('sink'));
+         #$pad->link($audiosink->get_pad('sink'));
          #die $self->_audio_decoder;
-         #$self->_audio_decoder->link($audiosink);
+         $self->_audio_decoder->link($audiosink);
       }
    );
    #this probably isn't the same as EOS.
@@ -274,8 +271,10 @@ sub capture_audio{
    $audiosink->signal_connect("new-buffer", sub{
          #my $audiosink = shift;
          warn 'pulling buf.';
-         die 'EOS?' if $audiosink->is_eos;
-         my $buf = $audiosink->pull_buffer();
+         #warn $audiosink->get('emit-signals');
+         warn 'EOS?' if $audiosink->get('eos');
+         my $buf = $audiosink->signal_connect('pull_buffer');
+         warn $buf;
          warn $self->query_time();
          #warn 'NEXT';
          #warn $buf->size;
@@ -288,9 +287,11 @@ sub capture_audio{
          push @datas, $buf->data;
          $datasize += $buf->size;
          $loop->quit if $datasize >= $datatarget;
+         $loop->quit if $audiosink->get('eos');
+         return 1;
       }
    );
-   $audiosink->get_bus()->signal_connect( 'message', sub{
+   $self->_audio_decoder->get_bus()->signal_connect( 'message', sub{
          my ($bus,$msg,$udata) = @_;
          if ($msg->type & 'error' or $msg->type & 'warning'){
             warn $msg->error;
