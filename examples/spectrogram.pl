@@ -17,7 +17,7 @@ my $tune = PDL::GStreamer->new(
 );
 #$tune->seek(10);
 
-my ($audio,$format) = $tune->capture_audio(5);
+my ($audio,$format) = $tune->capture_audio(1);
 
 #die $audio->dims;
 

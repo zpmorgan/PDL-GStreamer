@@ -73,43 +73,21 @@ sub _mk_audio_pipeline{
    my $self = shift;
    my $pipeline = GStreamer::Pipeline->new('audio-pipe');
    my $decoder = GStreamer::ElementFactory->make (uridecodebin=>'audio-decoder');
-   #my $filter = GStreamer::ElementFactory->make (identity =>'noop');
-   #my $conv = GStreamer::ElementFactory->make('audioconvert','aconv');
    my $audio_sink = GStreamer::ElementFactory->make ("appsink", "audio-appsink");
 
-   #$pipeline->add($decoder,$conv, $audio_sink);
    $pipeline->add($decoder, $audio_sink);
 
-   $pipeline->signal_connect ('pad-added', \&on_new_decoded_audio_pad, $audio_sink);
-   # dynamic pads. bleh.
-#unless ($decoder->link($filter,$audio_sink)){
-#     $self->_reveal_errs($pipeline->get_bus);
-#     die 'link failed';
-#  }
-
    $decoder->set(uri => Glib::filename_to_uri $self->filename, "localhost");
-   $pipeline->set_state('paused');
    $audio_sink->set("sync", FALSE);
 
-   #$decoder->link($audio_sink);
+#   $decoder->link($audio_sink);
    $self->_audio_decoder($decoder);
    $self->_audiosink($audio_sink);
 
+   $pipeline->set_state('paused');
    return $pipeline;
    my @state = $pipeline->get_state(-1);
-   unless ($state[0] eq 'success'){
-      $self->_reveal_errs($pipeline->get_bus);
-   }
-   return $pipeline;
-}
-
-sub on_new_decoded_audio_pad{
-   my ($adbin,$pad, $appsink) = @_;
-   $adbin->link($appsink);
-}
-sub no_more_audio_pads{
-   my ($adbin) = @_;
-   $loop->quit();
+   warn @state;
 }
 
 sub _mk_player{
@@ -159,6 +137,8 @@ sub image_caps{
    );
    return $img_caps;
 }
+
+#this is not used..
 sub audio_caps{
    my $self = shift;
    my $audio_caps = GStreamer::Caps::Simple->new ("audio/x-raw-int",
@@ -169,6 +149,7 @@ sub audio_caps{
    return $audio_caps;
 }
 
+# it turns out polling is evil. Are you evil, gstreamer?
 sub _poll_for_async_done{
    my ($self,$bus) = @_;
    while(1){
@@ -177,32 +158,10 @@ sub _poll_for_async_done{
       die $msg if $msg->type & 'error';
    }
 }
-use Data::Dumper;
-sub _reveal_errs{
-   my ($self,$bus) = @_;
-   my @errs;
-   while(1){
-      my $msg = $bus->poll('any',1);#([qw/error async-done/], -1);
-      last unless $msg;
-      if ($msg->type & 'error' or $msg->type & 'warning'){
-         push @errs, $msg->error;
-         push @errs, $msg->debug;
-      }
-      elsif($msg->type & 'stream-status'){
-         warn Dumper $msg->get_structure->{fields}[0][2] . 'streamstatus';
-      }
-      else {
-         warn $msg->type;
-      }
-   }
-   return unless @errs;
-   confess join "\n",@errs;
-}
 
 sub seek{
    my ($self,$time) = @_;
    #$self->check_video;
-
    my @seek_params = (
       1, #rate
       "time", #3, #format. GST_FORMAT_TIME(), #format
@@ -212,34 +171,30 @@ sub seek{
       "none", #stop_type. GST_SEEK_TYPE_NONE.
       -1, # stop.
    );
-   $self->_audio_pipeline;
    if ($self->do_audio){
-      #my $ok = $self->_audio_pipeline->seek(@seek_params);
-      my $ok = $self->_audio_pipeline->seek(@seek_params);
-      #sleep 1;
-      $self->_audio_pipeline->get_state(-1);
-      #$self->_reveal_errs($self->_audio_pipeline->get_bus) unless $ok;
+      my $p = $self->_audio_pipeline;
+      #$self->_audio_decoder->link($self->_audiosink);
+      #my $ok = $p->seek(@seek_params);
+      my $ok = $p->seek(@seek_params);
+      #my $ok = $self->_audio_decoder->seek(@seek_params);
+      sleep(1);
+      warn $p->get_state(-1);
+      #warn $self->_audio_decoder->get_state(-1);
+      warn 'TIME: '. $self->query_time();
       #die 'seek not handled correctly?' unless $ok;
-      #$self->_poll_for_async_done($self->_audio_pipeline->get_bus());
    }
    if ($self->do_video){
+      die;
       my $ok = $self->player->seek(@seek_params);
       die 'seek not handled correctly?' unless $ok;
-      $self->_poll_for_async_done($self->player->get_bus());
    }
-   return;
+}
 
-   my $vbus = $self->player->get_bus();
-   my $abus = $self->_audio_pipeline->get_bus();
-   #die join '|',($abus,$bus);
-   for my $bus ($abus,$vbus){
-      while(1){ #wait for seek to complete.
-         my $msg = $bus->poll('any',-1);#([qw/error async-done/], -1);
-         last if ($msg->type & 'async-done');
-         die $msg if $msg->type & 'error';
-      }
-   }
-#   my @state = $self->player->get_state(-1);
+sub query_time{
+   my $self = shift;
+   my $q = GStreamer::Query::Position->new('time'); #bleh
+   my @q = $self->_audio_pipeline->query($q);
+   return $q->position / GST_SECOND; 
 }
 
 sub capture_image{
@@ -265,7 +220,6 @@ sub capture_image{
 sub _read_audio_caps{
    my $caps_obj = shift;
    my $caps = $caps_obj->to_string;
-
    my ($endian) = $caps =~ /endianness=\(int\)(\d)/;
    my $littleendian = $endian==4;
    my ($rate) = $caps =~ /rate=\(int\)(\d+)\b/;
@@ -301,21 +255,30 @@ sub capture_audio{
    my @datas;
    my $datatarget;
    my $datasize=0;
+   $self->_audiosink->set("sync", FALSE);
    $self->_audio_decoder->signal_connect('pad-added', sub{
          warn 'buf pad!';
          my ($adbin, $pad) = @_;
-         $adbin->link($audiosink);
-#   $self->_audiosink->set("sync", FALSE);
+         $pad->link($audiosink->get_pad('sink'));
+         #die $self->_audio_decoder;
+         #$self->_audio_decoder->link($audiosink);
       }
    );
-   $self->_audio_decoder->signal_connect('no-more-pads', sub{
-         my ($adbin) = @_;
-         #$loop->quit;
-      }
-   );
+   #this probably isn't the same as EOS.
+   #$self->_audio_decoder->signal_connect('no-more-pads', sub{
+   #      my ($adbin) = @_;
+   #      warn 'end of stream';
+   #      $loop->quit;
+   #   }
+   #);
    $audiosink->signal_connect("new-buffer", sub{
          #my $audiosink = shift;
+         warn 'pulling buf.';
+         die 'EOS?' if $audiosink->is_eos;
          my $buf = $audiosink->pull_buffer();
+         warn $self->query_time();
+         #warn 'NEXT';
+         #warn $buf->size;
          unless ($format){
             $caps = $buf->get_caps();
             $format = _read_audio_caps($caps);
@@ -327,8 +290,25 @@ sub capture_audio{
          $loop->quit if $datasize >= $datatarget;
       }
    );
+   $audiosink->get_bus()->signal_connect( 'message', sub{
+         my ($bus,$msg,$udata) = @_;
+         if ($msg->type & 'error' or $msg->type & 'warning'){
+            warn $msg->error;
+            warn $msg->debug;
+         }
+         elsif($msg->type & 'stream-status'){
+            warn Dumper $msg->get_structure->{fields}[0][2] . 'streamstatus';
+         }
+         else {
+            warn $msg->type;
+         }
+         return 1;
+      }
+   );
    $self->seek(30);
+   #warn $self->_audio_pipeline->get_state(-1);
    $self->_audio_pipeline->set_state('playing');
+   $self->_audiosink->set("sync", FALSE);
    $loop->run;
    $self->_audio_pipeline->set_state('null');
 
