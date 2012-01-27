@@ -40,7 +40,8 @@ has _audio_decoder => (
 has _audiosink => (
    is => 'rw',
    #seems like this 'isa' could break.
-   isa => 'Glib::Object::_Unregistered::GstAppSink',
+   #       Glib::Object::_Unregistered::GstFakeSink
+   isa => 'Glib::Object::_Unregistered::GstFakeSink',
    required => 0,
 );
 has _videosink => (
@@ -70,12 +71,17 @@ sub _mk_audio_pipeline{
    my $self = shift;
    my $pipeline = GStreamer::Pipeline->new('audio-pipe');
    my $decoder = GStreamer::ElementFactory->make (uridecodebin=>'audio-decoder');
-   my $audio_sink = GStreamer::ElementFactory->make ("appsink", "audio-appsink");
+   my $audio_sink = GStreamer::ElementFactory->make ("fakesink", "audio-appsink");
+   my $id = GStreamer::ElementFactory->make ("identity", "audio-id");
 
    $pipeline->add($decoder, $audio_sink);
 
    $decoder->set(uri => Glib::filename_to_uri $self->filename, "localhost");
    $audio_sink->set("sync", FALSE);
+   $audio_sink->set("enable-last-buffer", TRUE);
+   $audio_sink->set("async", FALSE);
+   $audio_sink->set("signal-handoffs", TRUE);
+   $id->set("signal-handoffs", FALSE);
 
 #   $decoder->link($audio_sink);
    $self->_audio_decoder($decoder);
@@ -93,9 +99,8 @@ sub _mk_player{
    my $player = GStreamer::ElementFactory -> make(playbin2 => "player");
    # http://git.gnome.org/browse/totem/tree/src/totem-video-thumbnailer.c
    # http://git.gnome.org/browse/totem/tree/src/gst/totem-gst-helpers.c
-   my $audio_sink = GStreamer::ElementFactory->make ("appsink", "audio-fake-sink");
+   my $audio_sink = GStreamer::ElementFactory->make ("fakesink", "audio-fake-sink");
    my $video_sink = GStreamer::ElementFactory->make ("fakesink", "video-fake-sink");
-   $video_sink->set("sync", TRUE);
    #$self->_audiosink($audio_sink);
    $self->_videosink($video_sink);
 
@@ -106,7 +111,7 @@ sub _mk_player{
    );
    $player -> set(uri => Glib::filename_to_uri $self->filename, "localhost");
    #$player->set_state('playing');
-   $player->set_state('paused');
+   $player->set_state('ready');
    my @state = $player->get_state(-1);
    die join(',',@state) unless $state[0] eq 'success';
    return $player;
@@ -144,16 +149,6 @@ sub audio_caps{
       'depth','Glib::Int',8,
    );
    return $audio_caps;
-}
-
-# it turns out polling is evil. Are you evil, gstreamer?
-sub _poll_for_async_done{
-   my ($self,$bus) = @_;
-   while(1){
-      my $msg = $bus->poll('any',-1);#([qw/error async-done/], -1);
-      last if ($msg->type & 'async-done');
-      die $msg if $msg->type & 'error';
-   }
 }
 
 sub seek{
@@ -248,8 +243,7 @@ sub capture_audio{
    my $caps;
    my $format;
    my $audiosink = $self->_audiosink;
-   $audiosink->set(emit_signals => TRUE);
-   $audiosink->set("sync", FALSE);
+   #$audiosink->set(emit_signals => TRUE);
    my @datas;
    my $datatarget;
    my $datasize=0;
@@ -268,14 +262,16 @@ sub capture_audio{
    #      $loop->quit;
    #   }
    #);
-   $audiosink->signal_connect("new-buffer", sub{
+   $audiosink->signal_connect("handoff", sub{
+         my ($sink,$buf,$pad) = @_;
          #my $audiosink = shift;
          warn 'pulling buf.';
          #warn $audiosink->get('emit-signals');
-         warn 'EOS?' if $audiosink->get('eos');
-         my $buf = $audiosink->signal_connect('pull_buffer');
-         warn $buf;
-         warn $self->query_time();
+         #warn 'EOS?' if $audiosink->get('eos');
+#         my $buf = $audiosink->signal_emit('last-buffer');
+         #warn $buf;
+         my $data = $buf->data;
+         my $size = $buf->size;
          #warn 'NEXT';
          #warn $buf->size;
          unless ($format){
@@ -284,10 +280,12 @@ sub capture_audio{
             $datatarget = $format->{channels} * $seconds *
                           ($format->{width}/8) * $format->{rate};
          }
-         push @datas, $buf->data;
-         $datasize += $buf->size;
+         warn $self->query_time();
+         push @datas, $data;
+         $datasize += $size;
          $loop->quit if $datasize >= $datatarget;
-         $loop->quit if $audiosink->get('eos');
+         #$loop->quit if $audiosink->get('eos');
+         #warn $buf;
          return 1;
       }
    );
@@ -306,10 +304,9 @@ sub capture_audio{
          return 1;
       }
    );
-   $self->seek(30);
+   #$self->seek(30);
    #warn $self->_audio_pipeline->get_state(-1);
    $self->_audio_pipeline->set_state('playing');
-   $self->_audiosink->set("sync", FALSE);
    $loop->run;
    $self->_audio_pipeline->set_state('null');
 
@@ -321,10 +318,9 @@ sub capture_audio{
    return ($piddle,$format);
 }
 
-
+#todo: not player, pipeline
 sub check_audio{
    my $self = shift;
-   #my $naudiochannels = $self->player->get ('n-audio');
    my $tags = $self->player->signal_emit ('get-audio-tags',0);
    return ref ($tags) eq 'HASH';
 }

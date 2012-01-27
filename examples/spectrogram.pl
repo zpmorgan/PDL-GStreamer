@@ -17,12 +17,12 @@ my $tune = PDL::GStreamer->new(
 );
 #$tune->seek(10);
 
-my ($audio,$format) = $tune->capture_audio(1);
+my ($audio,$format) = $tune->capture_audio(5);
 
 #die $audio->dims;
-
 my $rawsound = pack ($format->{packtemplate} .'*' , $audio->slice('0')->list);
 my $pa;
 open ($pa,'|pacat --format=s16le --channels=1');
 print $pa $rawsound;
 close($pa);
+
