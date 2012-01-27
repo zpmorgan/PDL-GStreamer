@@ -222,8 +222,8 @@ sub _read_audio_caps{
    my ($channels) = $caps =~ /channels=\(int\)(\d)/;
    
    my $ptemplate; #TEMPLATE for unpack. bleh.
-   $ptemplate = 'n' if (($width==16) and !$littleendian);
-   $ptemplate = 's' if (($width==16) and $littleendian);
+   $ptemplate = 's' if (($width==16) and !$littleendian);
+   $ptemplate = 'n' if (($width==16) and $littleendian);
    die "$caps unpackable?" unless $ptemplate;
 
    my $format = {
