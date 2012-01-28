@@ -213,7 +213,7 @@ sub _read_audio_caps{
    my $caps_obj = shift;
    my $caps = $caps_obj->to_string;
    my ($endian) = $caps =~ /endianness=\(int\)(\d)/;
-   my $littleendian = $endian==4;
+   my $littleendian = $endian==1;
    my ($rate) = $caps =~ /rate=\(int\)(\d+)\b/;
    my ($signed) = $caps =~ /signed=\(boolean\)(\w+)\b/;
    my $signedness = $signed eq 'true';
@@ -222,8 +222,8 @@ sub _read_audio_caps{
    my ($channels) = $caps =~ /channels=\(int\)(\d)/;
    
    my $ptemplate; #TEMPLATE for unpack. bleh.
-   $ptemplate = 's' if (($width==16) and !$littleendian);
-   $ptemplate = 'n' if (($width==16) and $littleendian);
+   $ptemplate = 'n' if (($width==16) and !$littleendian);
+   $ptemplate = 's' if (($width==16) and $littleendian);
    die "$caps unpackable?" unless $ptemplate;
 
    my $format = {
