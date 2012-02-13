@@ -10,6 +10,11 @@ my $nine_zeros = '000000000';
 
 my ($loop); #cruft below.
 
+has gst_pid => (
+   is => 'rw',
+   isa => 'Int',
+);
+
 has playing => (
    is => 'rw',
    isa => 'Bool',
@@ -97,6 +102,13 @@ has [qw/scale_w scale_h/] => (
    required => 0,
 );
 
+sub DEMOLISH{
+   my $self = shift;
+   return unless $self->playing;
+   kill 15, $self->gst_pid;
+   close($self->info_fd);
+   close($self->input_fd);
+}
 
 
 sub width{
@@ -150,14 +162,13 @@ sub play{
       "|";
    #die $gst_launch_cmd;
    my $gst_launch_output; #info about pipelines,etc.
-   open ($gst_launch_output, $gst_launch_cmd) or die $!;
+   my $gst_pid =  open ($gst_launch_output, $gst_launch_cmd) or die $!;
    $self->info_fd($gst_launch_output);
+   $self->gst_pid($gst_pid);
 
-   warn;
    { #open input_fd
       my $fd;
       open($fd,'<',$self->input_fifo) or die $!;
-      warn;
       $self->input_fd($fd);
    }
    #open ($gst_pipe,'<',$self->input_fifo) or die $!;
@@ -180,7 +191,6 @@ sub get_frame{
    #warn;
    $self->play() unless $self->playing();
    my $data;
-   warn;
    read($self->input_fd,$data,$self->frame_size_in_bytes);
    my $img = pdl(unpack("C*",$data));
    #$img = $img->float / 256;
