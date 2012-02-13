@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 use Modern::Perl;
 use lib 'lib';
 use PDL::GStreamer;
@@ -15,16 +15,22 @@ die 'notfound' unless -e $filename;
 
 my $noir = PDL::GStreamer->new(
    filename => $filename,
+   do_audio => 0,
+   do_play => 0,
 );
-die unless $noir->check_video && $noir->check_audio;
+#die unless $noir->check_video && $noir->check_audio;
 
 $noir->seek(732.8); #seconds
-my $screenshot = $noir->capture_image;
+my $screenshot = $noir->get_frame;
+$screenshot = $screenshot->reshape(3,$noir->width,$noir->height);
 imag2d($screenshot/256);
 
 $noir->seek(rand(2200)); #seconds
-$screenshot = $noir->capture_image;
+$screenshot = $noir->get_frame;
+$screenshot = $screenshot->reshape(3,$noir->width,$noir->height);
 imag2d($screenshot/256);
+
+__END__
 
 my ($sound,$format) = $noir->capture_audio(10);
 #die $sound->dims;
