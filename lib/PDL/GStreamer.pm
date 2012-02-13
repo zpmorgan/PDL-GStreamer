@@ -13,6 +13,7 @@ my ($loop); #cruft below.
 has gst_pid => (
    is => 'rw',
    isa => 'Int',
+   clearer => 'clear_gst_pid',
 );
 
 has playing => (
@@ -35,6 +36,10 @@ sub seek{
    if($self->playing){
       close $self->input_fd;
       close $self->info_fd;
+   }
+   if ($self->gst_pid){
+      kill 15, $self->gst_pid;
+      $self->clear_gst_pid;
    }
    $self->start_time($time);
 }
