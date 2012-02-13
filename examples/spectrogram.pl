@@ -19,18 +19,20 @@ die 'notfound' unless -e $filename;
 my $tune = PDL::GStreamer->new(
    filename => $filename,
    do_video => 0,
+   do_audio => 1,
 );
 
 #die $tune->duration;
-#$tune->seek(10);
+$tune->seek(40);
+my $format = 'killthis';
 
-my $seconds = 28;
-my ($audio,$format) = $tune->capture_audio($seconds);
- ($audio,$format) = $tune->capture_audio($seconds);
+my $seconds = 05;
+my $audio = $tune->get_audio($seconds);
+#die $audio;
 
-unless(!$do_play or fork()){
+if ($do_play){
 #die $audio->dims;
-   my $rawsound = pack ($format->{packtemplate} .'*' , $audio->slice('0')->list);
+   my $rawsound = pack ('s*' , $audio->slice('0')->list);
    my $pa;
    open ($pa,'|pacat --format=s16le --channels=1');
    print $pa $rawsound unless fork();
