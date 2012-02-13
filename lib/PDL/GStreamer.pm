@@ -120,13 +120,22 @@ sub width{
    my $self = shift;
    return $self->scale_w if $self->scale_w;
    $self->avconv_info() =~ /\b(\d+)x(\d+)\b/;
+      or die 'no width? ' . $self->avconv_info;
    return $1;
 }
 sub height{
    my $self = shift;
    return $self->scale_h if $self->scale_h;
-   $self->avconv_info() =~ /\b(\d+)x(\d+)\b/;
+   $self->avconv_info() =~ /\b(\d+)x(\d+)\b/
+      or die 'no height? ' . $self->avconv_info;
    return $2;
+}
+
+sub duration{
+   my $self = shift;
+   $self->avconv_info() =~ /Duration: (\d\d):(\d\d):(\d\d\.?\d?\d?),/
+      or die 'no duration? ' . $self->avconv_info;
+   return $1*3600 + $2*60 + $3;
 }
 
 sub play{
