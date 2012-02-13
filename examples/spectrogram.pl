@@ -1,4 +1,4 @@
-
+#!/usr/bin/env perl
 use Modern::Perl;
 use lib 'lib';
 use PDL;
@@ -20,6 +20,8 @@ my $tune = PDL::GStreamer->new(
    filename => $filename,
    do_video => 0,
 );
+
+#die $tune->duration;
 #$tune->seek(10);
 
 my $seconds = 28;

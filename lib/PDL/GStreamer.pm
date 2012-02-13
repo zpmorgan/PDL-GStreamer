@@ -119,7 +119,7 @@ sub DEMOLISH{
 sub width{
    my $self = shift;
    return $self->scale_w if $self->scale_w;
-   $self->avconv_info() =~ /\b(\d+)x(\d+)\b/;
+   $self->avconv_info() =~ / (\d+)x(\d+) /
       or die 'no width? ' . $self->avconv_info;
    return $1;
 }
@@ -150,30 +150,41 @@ sub play{
          ?  "t. ! queue ! videoscale method=0 ! ".
             "video/x-raw-yuv,width=600,height=600 ! autovideosink "
          : '';
+
+   #$reformat: caps such as this:   
+   #"video/x-raw-yuv,width=32,height=32,framerate=50/1 ! ".
    my $reformat = 'video/x-raw-yuv';
    $reformat .= ',width='.$self->scale_w if $self->scale_w;
    $reformat .= ',height='.$self->scale_h if $self->scale_h;
    $reformat .= ',framerate=50/1' if 1;
 
-   my $gst_launch_cmd = 
+   #this works:
+   # gst-launch gnlfilesource caps="audio/x-raw-int" \
+   #     location=file:///home/zach/projects/PDL-GStreamer/foo.avi \
+   #      duration=10000000000 ! audioconvert ! audioresample ! autoaudiosink
+   my $audio_pipeline = ' ' ;
+   #   "gnlfilesource location=file://".$self->filename->absolute ." ".
+   #      "media-start=$start_time media-duration=$duration ! ".
+   #   'audioconvert ! audioresample ! '.
+   #   'filesink location=' . $self->raw_audio_fifo . ' ';
+
+   my $video_pipeline = 
       #"gst-launch v4l2src ! ".
       #"gst-launch filesrc location=/tmp/neato/tron.avi ! ".
-      "gst-launch gnlfilesource location=file://".$self->filename->absolute ." ".
+      "gnlfilesource location=file://".$self->filename->absolute ." ".
          "media-start=$start_time media-duration=$duration ! ".
       #"decodebin2 ! ".#video/x-raw-rgb ! ".
       "videoscale method=3 ! ".
       "videorate ! ".
-      #"video/x-raw-yuv,width=32,height=32,framerate=50/1 ! ".
       $reformat . ' ! '.
       "tee name=t  ".
-      #"t. ! queue ! videoscale method=0 ! ".
-      #      "video/x-raw-yuv,width=600,height=600 ! autovideosink ".
          $scaled_autosink .
          "t. ! queue ! ffmpegcolorspace ! ".
             "video/x-raw-rgb ! ".
-            "filesink location=" . $self->input_fifo . " ".
+            "filesink location=" . $self->input_fifo . " "
             #"fdsink ".
-      "|";
+      ;
+   my $gst_launch_cmd = "gst-launch $audio_pipeline $video_pipeline |";
    #die $gst_launch_cmd;
    my $gst_launch_output; #info about pipelines,etc.
    my $gst_pid =  open ($gst_launch_output, $gst_launch_cmd) or die $!;
