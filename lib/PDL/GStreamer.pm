@@ -233,6 +233,7 @@ sub _read_audio_caps{
       signed => $signedness,
       channels => $channels,
       packtemplate => $ptemplate,
+      caps => $caps, #in case we missed something.
    };
    return $format;
 }

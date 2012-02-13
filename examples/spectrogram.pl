@@ -8,7 +8,7 @@ use PDL::GStreamer;
 use PDL::FFTW;
 use PDL::Complex;
 
-my $do_play = 0;
+my $do_play = 1;
 
 use File::Spec;
 my $filename = shift @ARGV;
@@ -24,6 +24,7 @@ my $tune = PDL::GStreamer->new(
 
 my $seconds = 28;
 my ($audio,$format) = $tune->capture_audio($seconds);
+ ($audio,$format) = $tune->capture_audio($seconds);
 
 unless(!$do_play or fork()){
 #die $audio->dims;
