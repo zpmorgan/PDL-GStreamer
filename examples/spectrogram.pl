@@ -23,28 +23,29 @@ my $tune = PDL::GStreamer->new(
 );
 
 #die $tune->duration;
-$tune->seek(40);
-my $format = 'killthis';
+$tune->seek(rand() * 1000);
+#my $format = 'killthis';
 
 my $seconds = 05;
 my $audio = $tune->get_audio($seconds);
 #die $audio;
 
-if ($do_play){
+if ($do_play and !fork()){
 #die $audio->dims;
    my $rawsound = pack ('s*' , $audio->slice('0')->list);
    my $pa;
    open ($pa,'|pacat --format=s16le --channels=1');
-   print $pa $rawsound unless fork();
+   print $pa $rawsound;
    close($pa);
    exit;
 }
 
-my $ncols = 1000;
+my $ncols = 500;
 
 $audio = $audio->slice(0)->copy->squeeze;;
-my $window_time = .04;
-my $window_size = $window_time * $format->{rate};
+my $window_time = .01;
+
+my $window_size = $window_time * $tune->sample_rate;
 my $sample_step = 2;
 
 my $hann_window;
@@ -56,14 +57,14 @@ sub mk_hann_window{
 
 sub stfft{
    my $time = shift;
-   $time *= $format->{rate};
+   $time *= $tune->sample_rate;
    $time = int $time;
    my $window = $audio->slice($time.':'.($time+$window_size-1).':'.$sample_step)->sever;
    mk_hann_window($window->dim(0)) unless defined $hann_window;
    $window *= $hann_window;
 
    #make samples between -1 and 1.
-   $window /= 1<<($format->{width}-1);
+   $window /= 1<<(15);
    $window -= 1;
    
    #fft & convert to polar.
@@ -71,13 +72,13 @@ sub stfft{
    return $window->Cr2p->real;
 }
 my $spectrogram;
-for(0..$ncols-4){
+for(0..$ncols-10){
    my $t = $_ * $seconds / $ncols;
    my $col = stfft($t)->dummy(1);
    unless(defined $spectrogram){
       $spectrogram = zeros(3,$ncols,$col->dim(2));
    }
-   $spectrogram->slice("0:1,".$_) .= $col;
+   $spectrogram->slice("0:0,".$_) .= $col->slice(0);
 }
-$spectrogram /= $spectrogram->slice(":,:,9:-1")->max;
+$spectrogram /= $spectrogram->slice(":,:,19:-1")->max;
 imag2d($spectrogram);
