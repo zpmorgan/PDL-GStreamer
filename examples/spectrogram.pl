@@ -26,22 +26,22 @@ my $seconds = 28;
 my ($audio,$format) = $tune->capture_audio($seconds);
  ($audio,$format) = $tune->capture_audio($seconds);
 
-unless(!$do_play or fork()){
+if($do_play and !fork()){
 #die $audio->dims;
    my $rawsound = pack ($format->{packtemplate} .'*' , $audio->slice('0')->list);
    my $pa;
    open ($pa,'|pacat --format=s16le --channels=1');
-   print $pa $rawsound unless fork();
+   print $pa $rawsound;
    close($pa);
    exit;
 }
 
-my $ncols = 1000;
+my $ncols = 50;
 
 $audio = $audio->slice(0)->copy->squeeze;;
 my $window_time = .04;
 my $window_size = $window_time * $format->{rate};
-my $sample_step = 2;
+my $sample_step = 5;
 
 my $hann_window;
 sub mk_hann_window{
